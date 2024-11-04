@@ -1,123 +1,144 @@
 import time
 import logging
-import torch
+import psutil
 import cv2
+import numpy as np
+from dataclasses import dataclass
+from typing import Dict, Optional, List
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class PerformanceMetrics:
+    fps: float
+    cpu_percent: float
+    memory_percent: float
+    gpu_memory_used: Optional[float] = None
+    processing_time: float = 0.0
+    frame_count: int = 0
+    dropped_frames: int = 0
+
 class PerformanceMonitor:
-    def __init__(self, max_samples=30, fps_update_interval=1.0):
+    def __init__(self, history_size: int = 30):
         """
         Inicializa el monitor de rendimiento.
         
         Args:
-            max_samples (int): Número máximo de muestras para promediar
-            fps_update_interval (float): Intervalo de actualización de FPS en segundos
+            history_size: Número de muestras para calcular promedios
         """
-        self.max_samples = max_samples
-        self.fps_update_interval = fps_update_interval
-        self._init_metrics()
-
-    def _init_metrics(self):
-        """Inicializa las métricas de rendimiento."""
-        self.processing_times = []
+        self.start_time = time.time()
+        self.frame_times = deque(maxlen=history_size)
+        self.processing_times = deque(maxlen=history_size)
+        self.metrics_history = deque(maxlen=history_size)
         self.frame_count = 0
-        self.total_frames = 0
-        self.fps_start_time = time.time()
-        self.current_fps = 0
-        self.last_fps_update = time.time()
-
-    def update(self, start_time):
+        self.dropped_frames = 0
+        
+        # Inicializar proceso para métricas del sistema
+        self.process = psutil.Process()
+        
+    def start_frame(self) -> float:
+        """Marca el inicio del procesamiento de un frame."""
+        return time.time()
+    
+    def end_frame(self, start_time: float, success: bool = True) -> None:
         """
-        Actualiza las métricas con un nuevo frame.
+        Registra el fin del procesamiento de un frame.
         
         Args:
-            start_time (float): Tiempo de inicio del procesamiento del frame
-            
-        Returns:
-            float: FPS actuales si se actualizaron, None en caso contrario
+            start_time: Tiempo de inicio del procesamiento
+            success: Si el frame se procesó exitosamente
         """
-        current_time = time.time()
-        process_time = current_time - start_time
+        processing_time = time.time() - start_time
+        self.processing_times.append(processing_time)
         
-        # Actualizar contadores
-        self.frame_count += 1
-        self.total_frames += 1
-        self.processing_times.append(process_time)
-        
-        # Mantener solo las últimas N muestras
-        if len(self.processing_times) > self.max_samples:
-            self.processing_times.pop(0)
-        
-        # Actualizar FPS si corresponde
-        if current_time - self.last_fps_update >= self.fps_update_interval:
-            self.current_fps = self.frame_count / (current_time - self.fps_start_time)
-            self.frame_count = 0
-            self.fps_start_time = current_time
-            self.last_fps_update = current_time
-            return self.current_fps
+        if success:
+            self.frame_count += 1
+        else:
+            self.dropped_frames += 1
             
-        return None
-
-    def get_metrics(self):
-        """
-        Obtiene las métricas actuales.
-        
-        Returns:
-            dict: Diccionario con las métricas actuales
-        """
-        avg_process_time = sum(self.processing_times) / len(self.processing_times) if self.processing_times else 0
-        
-        metrics = {
-            'fps': self.current_fps,
-            'avg_process_time': avg_process_time * 1000,  # convertir a ms
-            'total_frames': self.total_frames
-        }
-        
-        # Añadir métricas de GPU si está disponible
-        if torch.cuda.is_available():
-            metrics.update({
-                'gpu_name': torch.cuda.get_device_name(0),
-                'gpu_memory_allocated': torch.cuda.memory_allocated() / 1024**2,  # MB
-                'gpu_memory_reserved': torch.cuda.memory_reserved() / 1024**2     # MB
-            })
+        self.frame_times.append(time.time())
+    
+    def get_metrics(self) -> PerformanceMetrics:
+        """Obtiene las métricas actuales de rendimiento."""
+        # Calcular FPS
+        if len(self.frame_times) >= 2:
+            time_diff = self.frame_times[-1] - self.frame_times[0]
+            fps = (len(self.frame_times) - 1) / time_diff if time_diff > 0 else 0
+        else:
+            fps = 0
             
+        # Métricas del sistema
+        try:
+            cpu_percent = self.process.cpu_percent()
+            memory_percent = self.process.memory_percent()
+        except Exception as e:
+            logger.error(f"Error al obtener métricas del sistema: {e}")
+            cpu_percent = 0
+            memory_percent = 0
+            
+        # Tiempo promedio de procesamiento
+        avg_processing_time = (
+            sum(self.processing_times) / len(self.processing_times)
+            if self.processing_times else 0
+        )
+        
+        metrics = PerformanceMetrics(
+            fps=fps,
+            cpu_percent=cpu_percent,
+            memory_percent=memory_percent,
+            processing_time=avg_processing_time,
+            frame_count=self.frame_count,
+            dropped_frames=self.dropped_frames
+        )
+        
+        self.metrics_history.append(metrics)
         return metrics
-
-    def add_overlay(self, frame):
+    
+    def add_overlay(self, frame: np.ndarray) -> np.ndarray:
         """
-        Añade una superposición con métricas al frame.
+        Agrega un overlay con métricas al frame.
         
         Args:
-            frame: Frame al que añadir las métricas
+            frame: Frame al que agregar el overlay
             
         Returns:
-            frame: Frame con las métricas superpuestas
+            Frame con overlay
         """
         metrics = self.get_metrics()
         
-        # Configuración del texto
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        scale = 0.6
-        thickness = 2
-        color = (255, 255, 255)
+        # Crear overlay
+        overlay = frame.copy()
+        alpha = 0.4
         
-        # Posición inicial
-        y_position = 30
-        x_position = 10
+        # Región para métricas
+        cv2.rectangle(overlay, (10, 10), (250, 120), (0, 0, 0), -1)
+        frame = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
         
-        # Función helper para añadir texto
-        def add_text(text):
-            nonlocal y_position
-            cv2.putText(frame, text, (x_position, y_position), font, scale, color, thickness)
-            y_position += 25
-
-        # Añadir métricas
-        add_text(f"FPS: {metrics['fps']:.1f}")
-        add_text(f"Proc time: {metrics['avg_process_time']:.1f}ms")
+        # Texto de métricas
+        metrics_text = [
+            f"FPS: {metrics.fps:.1f}",
+            f"CPU: {metrics.cpu_percent:.1f}%",
+            f"MEM: {metrics.memory_percent:.1f}%",
+            f"Process Time: {metrics.processing_time*1000:.1f}ms",
+            f"Dropped Frames: {metrics.dropped_frames}"
+        ]
         
-        if 'gpu_name' in metrics:
-            add_text(f"GPU: {metrics['gpu_name']}")
-            add_text(f"GPU Mem: {metrics['gpu_memory_allocated']:.1f}MB")
-        
+        y = 30
+        for text in metrics_text:
+            cv2.putText(frame, text, (20, y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            y += 20
+            
         return frame
+    
+    def log_metrics(self) -> None:
+        """Registra las métricas actuales en el log."""
+        metrics = self.get_metrics()
+        logger.info(
+            f"Performance - FPS: {metrics.fps:.1f}, "
+            f"CPU: {metrics.cpu_percent:.1f}%, "
+            f"MEM: {metrics.memory_percent:.1f}%, "
+            f"Process Time: {metrics.processing_time*1000:.1f}ms, "
+            f"Dropped: {metrics.dropped_frames}"
+        )
