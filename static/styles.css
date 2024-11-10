@@ -21,6 +21,19 @@ body {
     margin: 0;
 }
 
+.video-section {
+    background: black;
+    border-radius: 8px;
+    padding: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    width: 100%;
+    aspect-ratio: 16/9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
 #videoContainer {
     position: relative;
     width: 100%;
@@ -31,9 +44,10 @@ body {
 
 #video {
     width: 100%;
-    border: 3px solid #333;
-    border-radius: 8px;
-    background-color: #000;
+    height: 100%;
+    object-fit: contain;
+    background: black;
+    display: block;
 }
 
 #stats {
@@ -55,8 +69,10 @@ body {
     background-color: #fff;
     display: inline-block;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: all 0.3s ease;
 }
 
+/* Estados de conexión */
 .error { 
     color: #d32f2f;
     font-weight: bold;
@@ -75,6 +91,118 @@ body {
     background-color: #fff3e0;
 }
 
+/* Controles */
+.controls {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-top: 20px;
+}
+
+.control-group {
+    margin: 15px 0;
+    text-align: left;
+    padding: 0 20px;
+}
+
+.control-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #333;
+    font-weight: 500;
+}
+
+/* Estilo para los checkboxes */
+.control-group input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #2196F3;
+    border-radius: 4px;
+    margin-right: 8px;
+    position: relative;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: all 0.3s ease;
+}
+
+.control-group input[type="checkbox"]:checked {
+    background-color: #2196F3;
+}
+
+.control-group input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    color: white;
+    font-size: 14px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.control-group input[type="checkbox"]:hover {
+    border-color: #1976D2;
+}
+
+/* Estilo para el select */
+select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 2px solid #e0e0e0;
+    border-radius: 4px;
+    background-color: white;
+    font-size: 14px;
+    color: #333;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 16px;
+}
+
+select:hover {
+    border-color: #2196F3;
+}
+
+select:focus {
+    outline: none;
+    border-color: #2196F3;
+    box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+}
+
+/* Etiquetas de control */
+.control-label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+}
+
+.control-label:hover input[type="checkbox"] {
+    border-color: #1976D2;
+}
+
+/* Contenedor de métricas en stats */
+#stats div {
+    margin: 4px 0;
+    display: flex;
+    justify-content: space-between;
+    min-width: 150px;
+}
+
+#stats span {
+    margin-left: 8px;
+    font-weight: bold;
+    color: #4CAF50;
+}
+
 /* Animaciones */
 @keyframes pulse {
     0% { opacity: 1; }
@@ -84,4 +212,28 @@ body {
 
 .connecting {
     animation: pulse 1.5s infinite;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .container {
+        padding: 10px;
+    }
+
+    #videoContainer {
+        max-width: 100%;
+    }
+
+    .controls {
+        padding: 15px;
+    }
+
+    .control-group {
+        padding: 0 10px;
+    }
+
+    #stats {
+        font-size: 10px;
+        padding: 6px;
+    }
 }

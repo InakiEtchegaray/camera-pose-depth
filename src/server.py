@@ -26,25 +26,28 @@ class MetricsCollector:
         self.process = psutil.Process()
         self.start_time = time.time()
         self.last_metrics = {}
+        self.metrics_lock = asyncio.Lock()
 
-    def update_fps(self):
-        current_time = time.time()
-        time_diff = current_time - self.last_frame_time
-        if time_diff > 0:
-            self.fps_history.append(1.0 / time_diff)
-        self.last_frame_time = current_time
-        self.frames_processed += 1
+    async def update_metrics(self, new_metrics):
+        async with self.metrics_lock:
+            self.last_metrics.update(new_metrics)
+            self.frames_processed += 1
+            current_time = time.time()
+            if 'fps' in new_metrics:
+                self.fps_history.append(new_metrics['fps'])
 
     def get_metrics(self):
         try:
-            # Calcular FPS
+            # Calcular FPS como promedio móvil
             fps = sum(self.fps_history) / len(self.fps_history) if self.fps_history else 0
+            if self.last_metrics and 'fps' in self.last_metrics:
+                fps = self.last_metrics['fps']  # Usar FPS del último frame si está disponible
 
             # Métricas del sistema
             cpu_percent = psutil.cpu_percent()
             memory_percent = psutil.virtual_memory().percent
 
-            # Métricas de GPU si está disponible
+            # Métricas de GPU
             gpu_metrics = self._get_gpu_metrics()
 
             # Calcular latencia
@@ -58,12 +61,14 @@ class MetricsCollector:
                 'processed_frames': self.frames_processed,
                 'uptime': time.time() - self.start_time,
                 'gpu_usage': gpu_metrics.get('gpu_usage', None),
-                'gpu_memory': gpu_metrics.get('gpu_memory', None),
-                'gpu_temperature': gpu_metrics.get('gpu_temperature', None)
+                'gpu_memory': gpu_metrics.get('gpu_memory', None)
             }
 
             # Incluir métricas adicionales del procesamiento de video
-            metrics.update(self.last_metrics)
+            if self.last_metrics:
+                for key, value in self.last_metrics.items():
+                    if key not in metrics:
+                        metrics[key] = value
 
             return metrics
         except Exception as e:
@@ -109,8 +114,26 @@ class WebRTCServer:
         self.app.router.add_post("/offer", self.offer)
         self.app.router.add_post("/update-config", self.update_config)
         self.app.router.add_get("/metrics", self.get_metrics)
+        self.app.router.add_get("/supported-resolutions", self.get_supported_resolutions)
         
         logger.info("Rutas del servidor inicializadas")
+
+    async def get_supported_resolutions(self, request: web.Request) -> web.Response:
+        """Endpoint para obtener las resoluciones soportadas."""
+        try:
+            if self.active_tracks:
+                resolutions = self.active_tracks[0]._get_supported_resolutions()
+                return web.json_response([
+                    {"width": width, "height": height}
+                    for width, height in resolutions
+                ])
+            return web.json_response([
+                {"width": 640, "height": 480},
+                {"width": 1280, "height": 720}
+            ])
+        except Exception as e:
+            logger.error(f"Error al obtener resoluciones: {e}")
+            return web.json_response([], status=500)
 
     async def get_metrics(self, request: web.Request) -> web.Response:
         """Endpoint para obtener métricas del sistema."""
@@ -177,8 +200,7 @@ class WebRTCServer:
             
             # Configurar callback para métricas
             async def on_metrics_update(metrics):
-                self.metrics_collector.update_fps()
-                self.metrics_collector.last_metrics = metrics
+                await self.metrics_collector.update_metrics(metrics)
 
             video.on_metrics_update = on_metrics_update
             

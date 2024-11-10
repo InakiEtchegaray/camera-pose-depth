@@ -4,255 +4,46 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Camera Pose Depth</title>
+    <link rel="stylesheet" href="/static/styles.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/webrtc-adapter/8.2.3/adapter.min.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background-color: #f0f2f5;
-            min-height: 100vh;
-        }
-
-        .container {
-            display: grid;
-            grid-template-columns: 1fr 300px;
-            gap: 20px;
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-
-        .video-section {
-            background: white;
-            border-radius: 8px;
-            padding: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        #video {
-            width: 100%;
-            border-radius: 4px;
-            background: #000;
-        }
-
-        .controls-section {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .control-panel {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .metrics-panel {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-
-        .panel-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 16px;
-        }
-
-        .control-group {
-            margin-bottom: 16px;
-        }
-
-        select {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
-            font-size: 14px;
-            background-color: white;
-            margin-bottom: 8px;
-        }
-
-        .toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }
-
-        .toggle-label {
-            font-size: 14px;
-            color: #374151;
-        }
-
-        .toggle-input {
-            display: none;
-        }
-
-        .toggle-display {
-            width: 44px;
-            height: 24px;
-            border-radius: 12px;
-            background-color: #e5e7eb;
-            position: relative;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-
-        .toggle-display::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background-color: white;
-            border-radius: 50%;
-            top: 2px;
-            left: 2px;
-            transition: transform 0.3s;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-        }
-
-        .toggle-input:checked + .toggle-display {
-            background-color: #2563eb;
-        }
-
-        .toggle-input:checked + .toggle-display::after {
-            transform: translateX(20px);
-        }
-
-        .metrics-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 12px;
-        }
-
-        .metric-item {
-            padding: 12px;
-            background: #f9fafb;
-            border-radius: 6px;
-        }
-
-        .metric-label {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 4px;
-        }
-
-        .metric-value {
-            font-size: 16px;
-            font-weight: 600;
-            color: #1f2937;
-        }
-
-        #connection-status {
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            font-weight: 500;
-            margin-bottom: 16px;
-            text-align: center;
-        }
-
-        .status-connected {
-            background-color: #ecfdf5;
-            color: #047857;
-        }
-
-        .status-disconnected {
-            background-color: #fef2f2;
-            color: #dc2626;
-        }
-
-        .chart-container {
-            height: 100px;
-            margin-top: 16px;
-            background: #f9fafb;
-            border-radius: 6px;
-            padding: 8px;
-        }
-    </style>
 </head>
 <body>
     <div class="container">
-        <!-- Sección de Video -->
-        <div class="video-section">
-            <video id="video" autoplay playsinline></video>
+        <div class="header">
+            <h1>Camera Pose Depth</h1>
+            <div id="status">Desconectado</div>
         </div>
 
-        <!-- Sección de Controles y Métricas -->
-        <div class="controls-section">
-            <!-- Panel de Estado -->
-            <div class="control-panel">
-                <div id="connection-status" class="status-disconnected">
-                    Desconectado
-                </div>
+        <div id="videoContainer">
+            <div class="video-section">
+                <video id="video" autoplay playsinline></video>
+            </div>
+            <div id="stats">
+                <div>FPS: <span id="current-fps">0</span></div>
+                <div>Resolución: <span id="current-resolution">-</span></div>
+                <div>CPU: <span id="cpu-usage">0%</span></div>
+                <div>GPU: <span id="gpu-usage">0%</span></div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <label for="resolution">Resolución:</label>
+                <select id="resolution">
+                    <option value="640,480">640 x 480</option>
+                </select>
             </div>
 
-            <!-- Panel de Controles -->
-            <div class="control-panel">
-                <div class="panel-title">Controles</div>
+            <div class="control-group">
+                <label>
+                    <input type="checkbox" id="enable-pose" checked>
+                    Pose Detection
+                </label>
                 
-                <div class="control-group">
-                    <label class="toggle-label">Resolución</label>
-                    <select id="resolution">
-                        <option value="640,480">640 x 480</option>
-                        <option value="1280,720">1280 x 720</option>
-                        <option value="1920,1080">1920 x 1080</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <div class="toggle">
-                        <span class="toggle-label">Pose Detection</span>
-                        <label>
-                            <input type="checkbox" id="enable-pose" class="toggle-input" checked>
-                            <div class="toggle-display"></div>
-                        </label>
-                    </div>
-
-                    <div class="toggle">
-                        <span class="toggle-label">Depth Estimation</span>
-                        <label>
-                            <input type="checkbox" id="enable-depth" class="toggle-input" checked>
-                            <div class="toggle-display"></div>
-                        </label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Panel de Métricas -->
-            <div class="metrics-panel">
-                <div class="panel-title">Métricas de Rendimiento</div>
-                
-                <div class="metrics-grid">
-                    <div class="metric-item">
-                        <div class="metric-label">FPS</div>
-                        <div class="metric-value" id="current-fps">0</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Latencia</div>
-                        <div class="metric-value" id="latency">0 ms</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">GPU</div>
-                        <div class="metric-value" id="gpu-usage">0%</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">CPU</div>
-                        <div class="metric-value" id="cpu-usage">0%</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Memoria</div>
-                        <div class="metric-value" id="memory-usage">0%</div>
-                    </div>
-                    <div class="metric-item">
-                        <div class="metric-label">Frames Procesados</div>
-                        <div class="metric-value" id="processed-frames">0</div>
-                    </div>
-                </div>
+                <label>
+                    <input type="checkbox" id="enable-depth" checked>
+                    Depth Estimation
+                </label>
             </div>
         </div>
     </div>
@@ -260,7 +51,8 @@
     <script>
         let pc = null;
         const videoElement = document.getElementById('video');
-        const statusElement = document.getElementById('connection-status');
+        const statusElement = document.getElementById('status');
+        let metricsUpdateInterval = null;
 
         // Configuración inicial
         const config = {
@@ -269,29 +61,96 @@
             depthEnabled: true
         };
 
-        function updateStatus(status, message) {
-            statusElement.textContent = message || status;
-            statusElement.className = status === 'connected' ? 'status-connected' : 'status-disconnected';
+        function updateStatus(state, message) {
+            statusElement.textContent = message || state;
+            statusElement.className = ''; // Limpiar clases anteriores
+            
+            switch(state) {
+                case 'connected':
+                    statusElement.classList.add('success');
+                    break;
+                case 'disconnected':
+                    statusElement.classList.add('error');
+                    break;
+                case 'connecting':
+                    statusElement.classList.add('connecting');
+                    break;
+                default:
+                    statusElement.classList.add('error');
+            }
         }
 
-        // Manejadores de eventos para los controles
-        document.getElementById('resolution').addEventListener('change', (e) => {
+        async function getSupportedResolutions() {
+            try {
+                const response = await fetch('/supported-resolutions');
+                const resolutions = await response.json();
+                
+                const select = document.getElementById('resolution');
+                select.innerHTML = '';
+                
+                resolutions.forEach(res => {
+                    const option = document.createElement('option');
+                    option.value = `${res.width},${res.height}`;
+                    option.textContent = `${res.width} x ${res.height}`;
+                    select.appendChild(option);
+                });
+
+                if (config.resolution) {
+                    select.value = config.resolution;
+                }
+            } catch (e) {
+                console.error('Error al obtener resoluciones:', e);
+            }
+        }
+
+        function startMetricsUpdate() {
+            if (metricsUpdateInterval) {
+                clearInterval(metricsUpdateInterval);
+            }
+            
+            metricsUpdateInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/metrics');
+                    if (response.ok) {
+                        const metrics = await response.json();
+                        
+                        document.getElementById('current-fps').textContent = 
+                            metrics.fps.toFixed(1);
+                        document.getElementById('cpu-usage').textContent = 
+                            `${metrics.cpu_usage.toFixed(1)}%`;
+                        document.getElementById('gpu-usage').textContent = 
+                            `${(metrics.gpu_usage || 0).toFixed(1)}%`;
+                        
+                        if (metrics.resolution) {
+                            document.getElementById('current-resolution').textContent = 
+                                metrics.resolution;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error al actualizar métricas:', e);
+                }
+            }, 500);
+        }
+
+        // Event listeners para controles
+        document.getElementById('resolution').addEventListener('change', async (e) => {
             config.resolution = e.target.value;
-            updateConfig();
+            await updateConfig();
         });
 
-        document.getElementById('enable-pose').addEventListener('change', (e) => {
+        document.getElementById('enable-pose').addEventListener('change', async (e) => {
             config.poseEnabled = e.target.checked;
-            updateConfig();
+            await updateConfig();
         });
 
-        document.getElementById('enable-depth').addEventListener('change', (e) => {
+        document.getElementById('enable-depth').addEventListener('change', async (e) => {
             config.depthEnabled = e.target.checked;
-            updateConfig();
+            await updateConfig();
         });
 
         async function updateConfig() {
             try {
+                updateStatus('connecting', 'Actualizando configuración...');
                 const response = await fetch('/update-config', {
                     method: 'POST',
                     headers: {
@@ -303,38 +162,22 @@
                 if (!response.ok) {
                     throw new Error('Error al actualizar configuración');
                 }
+                updateStatus('connected', 'Conectado');
             } catch (e) {
                 console.error('Error:', e);
-            }
-        }
-
-        async function updateMetrics() {
-            try {
-                const response = await fetch('/metrics');
-                if (response.ok) {
-                    const metrics = await response.json();
-                    document.getElementById('current-fps').textContent = 
-                        metrics.fps.toFixed(1);
-                    document.getElementById('latency').textContent = 
-                        `${metrics.latency.toFixed(0)} ms`;
-                    document.getElementById('gpu-usage').textContent = 
-                        `${metrics.gpu_usage?.toFixed(1) || 0}%`;
-                    document.getElementById('cpu-usage').textContent = 
-                        `${metrics.cpu_usage.toFixed(1)}%`;
-                    document.getElementById('memory-usage').textContent = 
-                        `${metrics.memory_usage.toFixed(1)}%`;
-                    document.getElementById('processed-frames').textContent = 
-                        metrics.processed_frames;
-                }
-            } catch (e) {
-                console.error('Error al actualizar métricas:', e);
+                updateStatus('error', 'Error al actualizar configuración');
             }
         }
 
         async function start() {
             try {
+                updateStatus('connecting', 'Conectando...');
+                
                 if (pc) {
                     pc.close();
+                    if (metricsUpdateInterval) {
+                        clearInterval(metricsUpdateInterval);
+                    }
                 }
 
                 pc = new RTCPeerConnection({
@@ -350,6 +193,10 @@
                 pc.addEventListener('connectionstatechange', () => {
                     console.log('Connection State:', pc.connectionState);
                     updateStatus(pc.connectionState);
+                    
+                    if (pc.connectionState === 'connected') {
+                        startMetricsUpdate();
+                    }
                 });
 
                 await pc.setLocalDescription(await pc.createOffer({
@@ -373,15 +220,13 @@
 
             } catch(e) {
                 console.error('Error:', e);
-                updateStatus('disconnected', 'Error de conexión');
+                updateStatus('error', 'Error de conexión');
             }
         }
 
-        // Iniciar la conexión
+        // Inicializar
+        getSupportedResolutions();
         start();
-
-        // Actualizar métricas periódicamente
-        setInterval(updateMetrics, 1000);
     </script>
 </body>
 </html>
