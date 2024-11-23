@@ -1,0 +1,48 @@
+.metrics-card {
+  margin: 1rem 0;
+}
+
+.metric-item {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: var(--ion-color-light);
+  text-align: center;
+  transition: background-color 0.3s ease;
+}
+
+.metric-item:hover {
+  background: var(--ion-color-light-shade);
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  color: var(--ion-color-medium);
+  margin-bottom: 0.25rem;
+}
+
+.metric-value {
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: var(--ion-color-dark);
+}
+
+.error-message {
+  color: var(--ion-color-danger);
+  text-align: center;
+  padding: 1rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .metrics-card {
+    margin: 0.5rem 0;
+  }
+  
+  .metric-item {
+    padding: 0.5rem;
+  }
+  
+  .metric-value {
+    font-size: 1rem;
+  }
+}

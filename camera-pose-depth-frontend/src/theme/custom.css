@@ -1,0 +1,14 @@
+ion-content {
+    --background: var(--ion-color-light);
+  }
+  
+  ion-grid {
+    height: 100%;
+    padding: 1rem;
+  }
+  
+  @media (max-width: 768px) {
+    ion-grid {
+      padding: 0.5rem;
+    }
+  }

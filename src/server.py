@@ -2,10 +2,8 @@ import asyncio
 import json
 import logging
 import os
-import psutil
-import time
-import torch
 from aiohttp import web
+from aiohttp_cors import setup as cors_setup, ResourceOptions
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from collections import deque
 
@@ -18,82 +16,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class MetricsCollector:
-    def __init__(self):
-        self.fps_history = deque(maxlen=30)
-        self.last_frame_time = time.time()
-        self.frames_processed = 0
-        self.process = psutil.Process()
-        self.start_time = time.time()
-        self.last_metrics = {}
-        self.metrics_lock = asyncio.Lock()
-
-    async def update_metrics(self, new_metrics):
-        async with self.metrics_lock:
-            self.last_metrics.update(new_metrics)
-            self.frames_processed += 1
-            current_time = time.time()
-            if 'fps' in new_metrics:
-                self.fps_history.append(new_metrics['fps'])
-
-    def get_metrics(self):
-        try:
-            # Calcular FPS como promedio móvil
-            fps = sum(self.fps_history) / len(self.fps_history) if self.fps_history else 0
-            if self.last_metrics and 'fps' in self.last_metrics:
-                fps = self.last_metrics['fps']  # Usar FPS del último frame si está disponible
-
-            # Métricas del sistema
-            cpu_percent = psutil.cpu_percent()
-            memory_percent = psutil.virtual_memory().percent
-
-            # Métricas de GPU
-            gpu_metrics = self._get_gpu_metrics()
-
-            # Calcular latencia
-            latency = (time.time() - self.last_frame_time) * 1000
-
-            metrics = {
-                'fps': fps,
-                'latency': latency,
-                'cpu_usage': cpu_percent,
-                'memory_usage': memory_percent,
-                'processed_frames': self.frames_processed,
-                'uptime': time.time() - self.start_time,
-                'gpu_usage': gpu_metrics.get('gpu_usage', None),
-                'gpu_memory': gpu_metrics.get('gpu_memory', None)
-            }
-
-            # Incluir métricas adicionales del procesamiento de video
-            if self.last_metrics:
-                for key, value in self.last_metrics.items():
-                    if key not in metrics:
-                        metrics[key] = value
-
-            return metrics
-        except Exception as e:
-            logger.error(f"Error al obtener métricas: {e}")
-            return {}
-
-    def _get_gpu_metrics(self):
-        metrics = {}
-        if torch.cuda.is_available():
-            try:
-                # Uso de memoria GPU
-                gpu_memory_allocated = torch.cuda.memory_allocated(0)
-                gpu_memory_reserved = torch.cuda.memory_reserved(0)
-                total_memory = torch.cuda.get_device_properties(0).total_memory
-
-                metrics['gpu_memory'] = (gpu_memory_allocated / total_memory) * 100
-                metrics['gpu_usage'] = (gpu_memory_reserved / total_memory) * 100
-
-                # Intentar obtener temperatura si es posible
-                if hasattr(torch.cuda, 'get_device_temperature'):
-                    metrics['gpu_temperature'] = torch.cuda.get_device_temperature(0)
-            except Exception as e:
-                logger.error(f"Error al obtener métricas de GPU: {e}")
-
-        return metrics
+# Set para mantener las conexiones activas
+pcs = set()
 
 class WebRTCServer:
     def __init__(self):
@@ -101,43 +25,109 @@ class WebRTCServer:
         self.app = web.Application()
         self.pcs = set()
         self.active_tracks = []
-        self.metrics_collector = MetricsCollector()
+        
+        # Configurar CORS
+        cors = cors_setup(self.app, defaults={
+            "*": ResourceOptions(
+                allow_credentials=True,
+                expose_headers="*",
+                allow_headers="*",
+                allow_methods="*",
+                max_age=3600
+            )
+        })
+        
         self._init_routes()
+        
+        # Aplicar CORS a todas las rutas
+        for route in list(self.app.router.routes()):
+            cors.add(route)
 
     def _init_routes(self):
         """Inicializa las rutas del servidor."""
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
+        # Configurar rutas estáticas
         self.app.router.add_static('/static', 
                                  os.path.join(project_root, "static"))
+        
+        # Configurar rutas API
         self.app.router.add_get("/", self.index)
         self.app.router.add_post("/offer", self.offer)
         self.app.router.add_post("/update-config", self.update_config)
         self.app.router.add_get("/metrics", self.get_metrics)
-        self.app.router.add_get("/supported-resolutions", self.get_supported_resolutions)
         
         logger.info("Rutas del servidor inicializadas")
 
-    async def get_supported_resolutions(self, request: web.Request) -> web.Response:
-        """Endpoint para obtener las resoluciones soportadas."""
-        try:
-            if self.active_tracks:
-                resolutions = self.active_tracks[0]._get_supported_resolutions()
-                return web.json_response([
-                    {"width": width, "height": height}
-                    for width, height in resolutions
-                ])
-            return web.json_response([
-                {"width": 640, "height": 480},
-                {"width": 1280, "height": 720}
-            ])
-        except Exception as e:
-            logger.error(f"Error al obtener resoluciones: {e}")
-            return web.json_response([], status=500)
+    async def cleanup_old_connections(self):
+        """Limpia las conexiones antiguas."""
+        for pc in self.pcs.copy():
+            if pc.connectionState == "failed" or pc.connectionState == "closed":
+                await pc.close()
+                self.pcs.discard(pc)
 
-    async def get_metrics(self, request: web.Request) -> web.Response:
-        """Endpoint para obtener métricas del sistema."""
-        return web.json_response(self.metrics_collector.get_metrics())
+    async def offer(self, request: web.Request) -> web.Response:
+        """Maneja las ofertas WebRTC."""
+        try:
+            await self.cleanup_old_connections()
+            
+            params = await request.json()
+            offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
+            pc = RTCPeerConnection()
+            self.pcs.add(pc)
+
+            initial_config = params.get("config", {})
+            width, height = map(int, initial_config.get('resolution', '640,480').split(','))
+            
+            @pc.on("connectionstatechange")
+            async def on_connectionstatechange():
+                logger.info(f"Estado de conexión: {pc.connectionState}")
+                if pc.connectionState == "failed":
+                    await pc.close()
+                    self.pcs.discard(pc)
+                    if pc in self.pcs:
+                        self.pcs.discard(pc)
+            
+            try:
+                # Crear track de video
+                video = VideoTransformTrack({
+                    'width': width,
+                    'height': height,
+                    'pose_enabled': initial_config.get('poseEnabled', True),
+                    'depth_enabled': initial_config.get('depthEnabled', True)
+                })
+                
+                # Limpiar tracks antiguos
+                self.active_tracks = [track for track in self.active_tracks 
+                                    if track.readyState != "ended"]
+                self.active_tracks.append(video)
+                
+                pc.addTrack(video)
+                await pc.setRemoteDescription(offer)
+                answer = await pc.createAnswer()
+                await pc.setLocalDescription(answer)
+                
+                return web.Response(
+                    content_type="application/json",
+                    text=json.dumps({
+                        "sdp": pc.localDescription.sdp,
+                        "type": pc.localDescription.type
+                    })
+                )
+            except Exception as e:
+                logger.error(f"Error en proceso de offer: {e}")
+                if pc in self.pcs:
+                    await pc.close()
+                    self.pcs.discard(pc)
+                raise
+
+        except Exception as e:
+            logger.error(f"Error general en offer: {e}")
+            return web.Response(
+                status=500,
+                text=json.dumps({"error": str(e)}),
+                content_type="application/json"
+            )
 
     async def update_config(self, request: web.Request) -> web.Response:
         """Actualiza la configuración de procesamiento."""
@@ -149,17 +139,26 @@ class WebRTCServer:
             pose_enabled = data['poseEnabled']
             depth_enabled = data['depthEnabled']
 
+            # Actualizar tracks activos
+            self.active_tracks = [track for track in self.active_tracks 
+                                if track.readyState != "ended"]
+            
+            success = True
             for track in self.active_tracks:
-                await track.update_config({
-                    'width': width,
-                    'height': height,
-                    'pose_enabled': pose_enabled,
-                    'depth_enabled': depth_enabled
-                })
+                try:
+                    track.update_config({
+                        'width': width,
+                        'height': height,
+                        'pose_enabled': pose_enabled,
+                        'depth_enabled': depth_enabled
+                    })
+                except Exception as e:
+                    logger.error(f"Error actualizando track: {e}")
+                    success = False
 
             return web.Response(
                 content_type="application/json",
-                text=json.dumps({"success": True})
+                text=json.dumps({"success": success})
             )
         except Exception as e:
             logger.error(f"Error al actualizar configuración: {e}")
@@ -172,71 +171,48 @@ class WebRTCServer:
                 status=400
             )
 
-    async def offer(self, request: web.Request) -> web.Response:
-        """Maneja las ofertas WebRTC."""
-        params = await request.json()
-        offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-        pc = RTCPeerConnection()
-        self.pcs.add(pc)
-
-        initial_config = params.get("config", {})
-        width, height = map(int, initial_config.get('resolution', '640,480').split(','))
-        
-        @pc.on("connectionstatechange")
-        async def on_connectionstatechange():
-            logger.info(f"Estado de conexión: {pc.connectionState}")
-            if pc.connectionState == "failed":
-                await pc.close()
-                self.pcs.discard(pc)
-        
+    async def get_metrics(self, request: web.Request) -> web.Response:
+        """Endpoint para obtener métricas."""
         try:
-            # Crear track de video con métricas
-            video = VideoTransformTrack({
-                'width': width,
-                'height': height,
-                'pose_enabled': initial_config.get('poseEnabled', True),
-                'depth_enabled': initial_config.get('depthEnabled', True)
-            })
+            # Limpiar tracks inactivos
+            self.active_tracks = [track for track in self.active_tracks 
+                                if track.readyState != "ended"]
             
-            # Configurar callback para métricas
-            async def on_metrics_update(metrics):
-                await self.metrics_collector.update_metrics(metrics)
+            metrics = {
+                'fps': 0,
+                'cpu_usage': 0,
+                'gpu_usage': 0,
+                'latency': 0
+            }
+            
+            if self.active_tracks:
+                track = self.active_tracks[0]
+                track_metrics = track.get_performance_metrics()
+                metrics.update(track_metrics)
 
-            video.on_metrics_update = on_metrics_update
-            
-            self.active_tracks.append(video)
-            pc.addTrack(video)
-            
-            await pc.setRemoteDescription(offer)
-            answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-            
             return web.Response(
                 content_type="application/json",
-                text=json.dumps({
-                    "sdp": pc.localDescription.sdp,
-                    "type": pc.localDescription.type
-                })
+                text=json.dumps(metrics),
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET',
+                    'Access-Control-Allow-Headers': 'Content-Type'
+                }
             )
         except Exception as e:
-            logger.error(f"Error en offer: {e}")
-            if pc in self.pcs:
-                self.pcs.discard(pc)
-            raise
+            logger.error(f"Error obteniendo métricas: {e}")
+            return web.Response(
+                status=500,
+                text=json.dumps({"error": str(e)}),
+                content_type="application/json"
+            )
 
     async def index(self, request: web.Request) -> web.Response:
         """Sirve la página principal."""
-        try:
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            template_path = os.path.join(project_root, "templates", "index.html")
-            
-            with open(template_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            return web.Response(content_type="text/html", text=content)
-        except Exception as e:
-            logger.error(f"Error al servir index: {e}")
-            raise
+        return web.Response(
+            content_type="text/plain",
+            text="WebRTC Server Running"
+        )
 
 async def cleanup_connections(app):
     """Limpia las conexiones al cerrar el servidor."""
@@ -262,6 +238,7 @@ def run_server():
     except KeyboardInterrupt:
         print("\nServidor detenido por el usuario")
     finally:
+        # Limpiar conexiones
         loop = asyncio.get_event_loop()
         for pc in server.pcs:
             loop.run_until_complete(pc.close())

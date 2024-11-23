@@ -1,0 +1,24 @@
+.controls-card {
+    margin: 1rem;
+  }
+  
+  .controls-card ion-item {
+    --padding-start: 0;
+    --inner-padding-end: 0;
+  }
+  
+  .controls-card ion-select {
+    max-width: 100%;
+    width: 100%;
+    padding-left: 0;
+  }
+  
+  .controls-card ion-toggle {
+    padding-right: 0;
+  }
+  
+  @media (max-width: 768px) {
+    .controls-card {
+      margin: 0.5rem;
+    }
+  }
