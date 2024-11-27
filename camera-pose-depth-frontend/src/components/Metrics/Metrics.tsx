@@ -3,36 +3,33 @@ import React, { useEffect, useState } from 'react';
 import WebRTCService from '../../services/WebRTCService';
 import './Metrics.css';
 
-interface Metrics {
+interface MetricsData {
   fps: number;
-  cpu_usage: number;
-  gpu_usage: number;
-  latency: number;
+  status: string;
 }
 
-const defaultMetrics: Metrics = {
-  fps: 0,
-  cpu_usage: 0,
-  gpu_usage: 0,
-  latency: 0
-};
-
-export const Metrics: React.FC = () => {
-  const [metrics, setMetrics] = useState<Metrics>(defaultMetrics);
+const Metrics: React.FC = () => {
+  const [metrics, setMetrics] = useState<MetricsData>({
+    fps: 0,
+    status: 'disconnected'
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     const interval = setInterval(async () => {
       try {
-        const newMetrics = await WebRTCService.getMetrics();
         if (mounted) {
-          setMetrics(newMetrics);
+          const data = await WebRTCService.getMetrics();
+          setMetrics({
+            fps: data?.fps || 0,
+            status: data?.status || 'disconnected'
+          });
           setError(null);
         }
       } catch (error) {
-        console.warn('Error fetching metrics:', error);
         if (mounted) {
+          console.warn('Error fetching metrics:', error);
           setError('Error al obtener métricas');
         }
       }
@@ -55,27 +52,17 @@ export const Metrics: React.FC = () => {
               <IonCol size="6">
                 <div className="metric-item">
                   <div className="metric-label">FPS</div>
-                  <div className="metric-value">{metrics.fps.toFixed(1)}</div>
+                  <div className="metric-value">
+                    {metrics.fps.toFixed(1)}
+                  </div>
                 </div>
               </IonCol>
               <IonCol size="6">
                 <div className="metric-item">
-                  <div className="metric-label">Latencia</div>
-                  <div className="metric-value">{metrics.latency.toFixed(0)} ms</div>
-                </div>
-              </IonCol>
-            </IonRow>
-            <IonRow>
-              <IonCol size="6">
-                <div className="metric-item">
-                  <div className="metric-label">CPU</div>
-                  <div className="metric-value">{metrics.cpu_usage.toFixed(1)}%</div>
-                </div>
-              </IonCol>
-              <IonCol size="6">
-                <div className="metric-item">
-                  <div className="metric-label">GPU</div>
-                  <div className="metric-value">{metrics.gpu_usage.toFixed(1)}%</div>
+                  <div className="metric-label">Estado</div>
+                  <div className="metric-value">
+                    {metrics.status}
+                  </div>
                 </div>
               </IonCol>
             </IonRow>

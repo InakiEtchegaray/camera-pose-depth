@@ -17,33 +17,47 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
 
   const setupStream = async () => {
-    if (isConnecting || !videoRef.current) return;
+    if (!videoRef.current || !mountedRef.current) return;
     
     try {
       setIsConnecting(true);
       setError(null);
       
       await WebRTCService.setupConnection(videoRef.current);
-      onStreamReady?.(videoRef.current);
+      
+      if (mountedRef.current) {
+        onStreamReady?.(videoRef.current);
+      }
       
     } catch (error) {
       console.error('Failed to setup stream:', error);
-      setError(error instanceof Error ? error.message : 'Error desconocido');
+      if (mountedRef.current) {
+        setError(error instanceof Error ? error.message : 'Error desconocido');
+      }
     } finally {
-      setIsConnecting(false);
+      if (mountedRef.current) {
+        setIsConnecting(false);
+      }
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     setupStream();
+
+    return () => {
+      mountedRef.current = false;
+      WebRTCService.disconnect();
+    };
   }, []);
 
   useImperativeHandle(ref, () => ({
     videoElement: videoRef.current,
     reconnect: setupStream
-  }), [videoRef.current]);
+  }));
 
   return (
     <IonCard className="video-card">
@@ -52,6 +66,7 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
           ref={videoRef}
           autoPlay
           playsInline
+          muted
           className="video-element"
         />
         {isConnecting && (

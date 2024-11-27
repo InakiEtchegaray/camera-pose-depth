@@ -1,26 +1,19 @@
 class WebRTCService {
     private peerConnection: RTCPeerConnection | null = null;
     private config = {
-        resolution: '640,480',
-        poseEnabled: true,
-        depthEnabled: true
+        resolution: '640,480'
     };
-    private isConnecting = false;
+
+    private rtcConfig = {
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    };
 
     async setupConnection(videoElement: HTMLVideoElement): Promise<void> {
-        if (this.isConnecting) {
-            console.log('Ya hay una conexión en proceso');
-            return;
-        }
-
         try {
-            this.isConnecting = true;
-            console.log('Iniciando configuración de WebRTC');
+            // Si hay una conexión previa, cerrarla primero
+            this.disconnect();
             
-            if (this.peerConnection) {
-                console.log('Cerrando conexión existente');
-                this.disconnect();
-            }
+            console.log('Iniciando configuración de WebRTC');
 
             if (videoElement.srcObject) {
                 console.log('Limpiando stream anterior');
@@ -30,15 +23,15 @@ class WebRTCService {
             }
 
             console.log('Creando nueva conexión RTCPeerConnection');
-            this.peerConnection = new RTCPeerConnection({
-                iceServers: []
-            });
+            this.peerConnection = new RTCPeerConnection(this.rtcConfig);
 
             this.peerConnection.addEventListener('track', (evt) => {
                 console.log('Track recibido:', evt.track.kind);
                 if (evt.track.kind === 'video') {
                     console.log('Asignando stream de video');
-                    videoElement.srcObject = evt.streams[0];
+                    const stream = new MediaStream([evt.track]);
+                    videoElement.srcObject = stream;
+                    videoElement.play().catch(e => console.error('Error reproduciendo video:', e));
                 }
             });
 
@@ -51,11 +44,11 @@ class WebRTCService {
             });
 
             console.log('Creando oferta');
-            await this.peerConnection.setLocalDescription(
-                await this.peerConnection.createOffer({
-                    offerToReceiveVideo: true
-                })
-            );
+            const offer = await this.peerConnection.createOffer({
+                offerToReceiveVideo: true
+            });
+
+            await this.peerConnection.setLocalDescription(offer);
 
             console.log('Enviando oferta al servidor');
             const response = await fetch('/offer', {
@@ -75,16 +68,15 @@ class WebRTCService {
             }
 
             const answer = await response.json();
-            console.log('Respuesta recibida del servidor', answer);
+            console.log('Respuesta recibida del servidor');
 
             await this.peerConnection.setRemoteDescription(answer);
             console.log('Descripción remota establecida');
 
         } catch (error) {
             console.error('Error en setupConnection:', error);
+            this.disconnect();
             throw error;
-        } finally {
-            this.isConnecting = false;
         }
     }
 
@@ -116,39 +108,31 @@ class WebRTCService {
         try {
             const response = await fetch('/metrics');
             if (!response.ok) {
-                throw new Error('Failed to get metrics');
+                throw new Error(`HTTP error! status: ${response.status}`);
             }
-            return response.json();
+            const data = await response.json();
+            return {
+                fps: data.fps || 0,
+                status: data.status || 'disconnected'
+            };
         } catch (error) {
-            console.error('Error getting metrics:', error);
+            console.warn('Error getting metrics:', error);
             return {
                 fps: 0,
-                cpu_usage: 0,
-                gpu_usage: 0,
-                latency: 0
+                status: 'error'
             };
-        }
-    }
-
-    async getSupportedResolutions(): Promise<any> {
-        try {
-            const response = await fetch('/supported-resolutions');
-            if (!response.ok) {
-                throw new Error('Failed to get supported resolutions');
-            }
-            return response.json();
-        } catch (error) {
-            console.error('Error getting supported resolutions:', error);
-            return [
-                { width: 640, height: 480 },
-                { width: 1280, height: 720 }
-            ];
         }
     }
 
     disconnect(): void {
         if (this.peerConnection) {
             try {
+                const senders = this.peerConnection.getSenders();
+                senders.forEach(sender => {
+                    if (sender.track) {
+                        sender.track.stop();
+                    }
+                });
                 this.peerConnection.close();
             } catch (error) {
                 console.error('Error closing connection:', error);

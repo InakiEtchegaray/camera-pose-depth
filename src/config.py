@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 @dataclass
 class CameraConfig:
@@ -11,24 +11,23 @@ class CameraConfig:
     DEVICE_ID: int = 0
 
 @dataclass
-class DepthConfig:
-    MODEL_NAME: str = "LiheYoung/depth-anything-base-hf"
-    UPDATE_INTERVAL: float = 0.5  # Aumentado para reducir la frecuencia de procesamiento
-    PROCESS_WIDTH: int = 128  # Reducido para menor carga
-    PROCESS_HEIGHT: int = 96   # Reducido para menor carga
-    GPU_MEMORY_FRACTION: float = 0.6
-    ENABLE_CACHE: bool = True
-    CACHE_SIZE: int = 16
-    USE_HALF_PRECISION: bool = True  # Nuevo: usar FP16 para mejor rendimiento en GPU
+class SupervisionConfig:
+    MODEL_PATH: str = "yolov8n.pt"
+    CONFIDENCE_THRESHOLD: float = 0.5
+    DEVICE: str = "cpu"
+    PROCESS_EVERY_N_FRAMES: int = 1
+    ENABLE_TRACKING: bool = True
+    PERSON_CLASS_ID: int = 0
+    NMS_THRESHOLD: float = 0.4
 
 @dataclass
-class PoseConfig:
-    MODEL_COMPLEXITY: int = 0  # Reducido a 0 para menor complejidad
-    MIN_DETECTION_CONFIDENCE: float = 0.6
-    MIN_TRACKING_CONFIDENCE: float = 0.6
-    ENABLE_SMOOTHING: bool = True
-    MAX_NUM_HANDS: int = 2
-    PROCESS_EVERY_N_FRAMES: int = 2  # Nuevo: procesar cada N frames
+class VisualizationConfig:
+    SHOW_FPS: bool = True
+    SHOW_CONFIDENCE: bool = True
+    BOX_THICKNESS: int = 2
+    BOX_COLOR: Tuple[int, int, int] = (0, 255, 0)  # BGR format
+    TEXT_COLOR: Tuple[int, int, int] = (255, 255, 255)
+    ENABLE_DEBUG_INFO: bool = True
 
 @dataclass
 class ServerConfig:
@@ -45,20 +44,20 @@ class Config:
         return CameraConfig()
 
     @staticmethod
-    def create_depth_config() -> DepthConfig:
-        return DepthConfig()
+    def create_supervision_config() -> SupervisionConfig:
+        return SupervisionConfig()
 
     @staticmethod
-    def create_pose_config() -> PoseConfig:
-        return PoseConfig()
+    def create_visualization_config() -> VisualizationConfig:
+        return VisualizationConfig()
 
     @staticmethod
     def create_server_config() -> ServerConfig:
         return ServerConfig()
 
     CAMERA: CameraConfig = field(default_factory=create_camera_config)
-    DEPTH: DepthConfig = field(default_factory=create_depth_config)
-    POSE: PoseConfig = field(default_factory=create_pose_config)
+    SUPERVISION: SupervisionConfig = field(default_factory=create_supervision_config)
+    VISUALIZATION: VisualizationConfig = field(default_factory=create_visualization_config)
     SERVER: ServerConfig = field(default_factory=create_server_config)
 
     @classmethod
@@ -78,21 +77,27 @@ class Config:
         if os.getenv('CAMERA_DEVICE_ID'):
             config.CAMERA.DEVICE_ID = int(os.getenv('CAMERA_DEVICE_ID'))
 
-        # Depth config from env
-        if os.getenv('DEPTH_MODEL_NAME'):
-            config.DEPTH.MODEL_NAME = os.getenv('DEPTH_MODEL_NAME')
-        if os.getenv('DEPTH_UPDATE_INTERVAL'):
-            config.DEPTH.UPDATE_INTERVAL = float(os.getenv('DEPTH_UPDATE_INTERVAL'))
-        if os.getenv('DEPTH_GPU_MEMORY_FRACTION'):
-            config.DEPTH.GPU_MEMORY_FRACTION = float(os.getenv('DEPTH_GPU_MEMORY_FRACTION'))
+        # Supervision config from env
+        if os.getenv('SUPERVISION_MODEL_PATH'):
+            config.SUPERVISION.MODEL_PATH = os.getenv('SUPERVISION_MODEL_PATH')
+        if os.getenv('SUPERVISION_CONFIDENCE_THRESHOLD'):
+            config.SUPERVISION.CONFIDENCE_THRESHOLD = float(os.getenv('SUPERVISION_CONFIDENCE_THRESHOLD'))
+        if os.getenv('SUPERVISION_DEVICE'):
+            config.SUPERVISION.DEVICE = os.getenv('SUPERVISION_DEVICE')
+        if os.getenv('SUPERVISION_PROCESS_EVERY_N_FRAMES'):
+            config.SUPERVISION.PROCESS_EVERY_N_FRAMES = int(os.getenv('SUPERVISION_PROCESS_EVERY_N_FRAMES'))
+        if os.getenv('SUPERVISION_ENABLE_TRACKING'):
+            config.SUPERVISION.ENABLE_TRACKING = os.getenv('SUPERVISION_ENABLE_TRACKING').lower() == 'true'
 
-        # Pose config from env
-        if os.getenv('POSE_MODEL_COMPLEXITY'):
-            config.POSE.MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY'))
-        if os.getenv('POSE_MIN_DETECTION_CONFIDENCE'):
-            config.POSE.MIN_DETECTION_CONFIDENCE = float(os.getenv('POSE_MIN_DETECTION_CONFIDENCE'))
-        if os.getenv('POSE_MIN_TRACKING_CONFIDENCE'):
-            config.POSE.MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE'))
+        # Visualization config from env
+        if os.getenv('VISUALIZATION_SHOW_FPS'):
+            config.VISUALIZATION.SHOW_FPS = os.getenv('VISUALIZATION_SHOW_FPS').lower() == 'true'
+        if os.getenv('VISUALIZATION_SHOW_CONFIDENCE'):
+            config.VISUALIZATION.SHOW_CONFIDENCE = os.getenv('VISUALIZATION_SHOW_CONFIDENCE').lower() == 'true'
+        if os.getenv('VISUALIZATION_BOX_THICKNESS'):
+            config.VISUALIZATION.BOX_THICKNESS = int(os.getenv('VISUALIZATION_BOX_THICKNESS'))
+        if os.getenv('VISUALIZATION_DRAW_TRAJECTORIES'):
+            config.VISUALIZATION.DRAW_TRAJECTORIES = os.getenv('VISUALIZATION_DRAW_TRAJECTORIES').lower() == 'true'
 
         # Server config from env
         if os.getenv('SERVER_HOST'):

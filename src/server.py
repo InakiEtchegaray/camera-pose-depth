@@ -4,20 +4,17 @@ import logging
 import os
 from aiohttp import web
 from aiohttp_cors import setup as cors_setup, ResourceOptions
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from collections import deque
 
-from camera_processor import VideoTransformTrack
+from supervision_processor import SupervisionTransformTrack
 
 # Configuración de logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+    format='%(asctime)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Set para mantener las conexiones activas
-pcs = set()
 
 class WebRTCServer:
     def __init__(self):
@@ -69,60 +66,56 @@ class WebRTCServer:
     async def offer(self, request: web.Request) -> web.Response:
         """Maneja las ofertas WebRTC."""
         try:
-            await self.cleanup_old_connections()
-            
             params = await request.json()
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-            pc = RTCPeerConnection()
+            
+            # Configuración más simple para RTCPeerConnection
+            pc = RTCPeerConnection()  # Sin configuración ICE por ahora
             self.pcs.add(pc)
 
             initial_config = params.get("config", {})
             width, height = map(int, initial_config.get('resolution', '640,480').split(','))
-            
+
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(f"Estado de conexión: {pc.connectionState}")
                 if pc.connectionState == "failed":
+                    logger.info("Conexión fallida, cerrando...")
                     await pc.close()
                     self.pcs.discard(pc)
-                    if pc in self.pcs:
-                        self.pcs.discard(pc)
+                elif pc.connectionState == "connected":
+                    logger.info("Conexión establecida correctamente")
+                elif pc.connectionState == "disconnected":
+                    logger.info("Conexión desconectada")
+
+            # Crear track de Supervision
+            video = SupervisionTransformTrack({
+                'width': width,
+                'height': height
+            })
             
-            try:
-                # Crear track de video
-                video = VideoTransformTrack({
-                    'width': width,
-                    'height': height,
-                    'pose_enabled': initial_config.get('poseEnabled', True),
-                    'depth_enabled': initial_config.get('depthEnabled', True)
+            self.active_tracks = [track for track in self.active_tracks 
+                                if track.readyState != "ended"]
+            self.active_tracks.append(video)
+
+            pc.addTrack(video)
+            await pc.setRemoteDescription(offer)
+            answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+
+            return web.Response(
+                content_type="application/json",
+                text=json.dumps({
+                    "sdp": pc.localDescription.sdp,
+                    "type": pc.localDescription.type
                 })
-                
-                # Limpiar tracks antiguos
-                self.active_tracks = [track for track in self.active_tracks 
-                                    if track.readyState != "ended"]
-                self.active_tracks.append(video)
-                
-                pc.addTrack(video)
-                await pc.setRemoteDescription(offer)
-                answer = await pc.createAnswer()
-                await pc.setLocalDescription(answer)
-                
-                return web.Response(
-                    content_type="application/json",
-                    text=json.dumps({
-                        "sdp": pc.localDescription.sdp,
-                        "type": pc.localDescription.type
-                    })
-                )
-            except Exception as e:
-                logger.error(f"Error en proceso de offer: {e}")
-                if pc in self.pcs:
-                    await pc.close()
-                    self.pcs.discard(pc)
-                raise
+            )
 
         except Exception as e:
-            logger.error(f"Error general en offer: {e}")
+            logger.error(f"Error en offer: {e}")
+            if 'pc' in locals() and pc in self.pcs:
+                await pc.close()
+                self.pcs.discard(pc)
             return web.Response(
                 status=500,
                 text=json.dumps({"error": str(e)}),
@@ -133,12 +126,8 @@ class WebRTCServer:
         """Actualiza la configuración de procesamiento."""
         try:
             data = await request.json()
-            logger.info(f"Recibida nueva configuración: {data}")
-
             width, height = map(int, data['resolution'].split(','))
-            pose_enabled = data['poseEnabled']
-            depth_enabled = data['depthEnabled']
-
+            
             # Actualizar tracks activos
             self.active_tracks = [track for track in self.active_tracks 
                                 if track.readyState != "ended"]
@@ -149,8 +138,6 @@ class WebRTCServer:
                     track.update_config({
                         'width': width,
                         'height': height,
-                        'pose_enabled': pose_enabled,
-                        'depth_enabled': depth_enabled
                     })
                 except Exception as e:
                     logger.error(f"Error actualizando track: {e}")
@@ -174,37 +161,34 @@ class WebRTCServer:
     async def get_metrics(self, request: web.Request) -> web.Response:
         """Endpoint para obtener métricas."""
         try:
-            # Limpiar tracks inactivos
             self.active_tracks = [track for track in self.active_tracks 
                                 if track.readyState != "ended"]
             
             metrics = {
                 'fps': 0,
-                'cpu_usage': 0,
-                'gpu_usage': 0,
-                'latency': 0
+                'status': 'disconnected' if not self.active_tracks else 'connected'
             }
             
             if self.active_tracks:
                 track = self.active_tracks[0]
-                track_metrics = track.get_performance_metrics()
-                metrics.update(track_metrics)
+                if hasattr(track, 'get_performance_metrics'):
+                    track_metrics = track.get_performance_metrics()
+                    metrics.update(track_metrics)
 
             return web.Response(
                 content_type="application/json",
-                text=json.dumps(metrics),
-                headers={
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET',
-                    'Access-Control-Allow-Headers': 'Content-Type'
-                }
+                text=json.dumps(metrics)
             )
         except Exception as e:
             logger.error(f"Error obteniendo métricas: {e}")
             return web.Response(
-                status=500,
-                text=json.dumps({"error": str(e)}),
-                content_type="application/json"
+                status=200,
+                content_type="application/json",
+                text=json.dumps({
+                    'fps': 0,
+                    'status': 'error',
+                    'error': str(e)
+                })
             )
 
     async def index(self, request: web.Request) -> web.Response:
@@ -229,7 +213,7 @@ def run_server():
         server.app.on_shutdown.append(cleanup_connections)
         
         print("\n" + "="*60)
-        print(" Camera Pose Depth Server")
+        print(" Camera Supervision Server")
         print(f" URL: http://localhost:8080")
         print(" Presiona Ctrl+C para detener")
         print("="*60 + "\n")
@@ -238,7 +222,6 @@ def run_server():
     except KeyboardInterrupt:
         print("\nServidor detenido por el usuario")
     finally:
-        # Limpiar conexiones
         loop = asyncio.get_event_loop()
         for pc in server.pcs:
             loop.run_until_complete(pc.close())
