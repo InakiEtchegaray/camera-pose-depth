@@ -14,11 +14,8 @@ class CameraConfig:
 class SupervisionConfig:
     MODEL_PATH: str = "yolov8n.pt"
     CONFIDENCE_THRESHOLD: float = 0.5
-    DEVICE: str = "cpu"
+    DEVICE: str = "cuda"  # Cambiado de 'cpu' a 'cuda'
     PROCESS_EVERY_N_FRAMES: int = 1
-    ENABLE_TRACKING: bool = True
-    PERSON_CLASS_ID: int = 0
-    NMS_THRESHOLD: float = 0.4
 
 @dataclass
 class VisualizationConfig:
