@@ -1,6 +1,11 @@
+interface Config {
+    resolution: string;
+    detection_area?: [number, number, number, number];  // tupla opcional de 4 números
+}
+
 class WebRTCService {
     private peerConnection: RTCPeerConnection | null = null;
-    private config = {
+    private config: Config = {
         resolution: '640,480'
     };
 
@@ -10,7 +15,7 @@ class WebRTCService {
 
     async setupConnection(videoElement: HTMLVideoElement): Promise<void> {
         try {
-            // Si hay una conexión previa, cerrarla primero
+            // Si hay una conexión previa, cerrarla
             this.disconnect();
             
             console.log('Iniciando configuración de WebRTC');
@@ -80,30 +85,40 @@ class WebRTCService {
         }
     }
 
-    async updateConfig(newConfig: typeof this.config): Promise<void> {
+    async updateConfig(newConfig: Partial<Config>): Promise<void> {
         try {
-            console.log('Actualizando configuración:', newConfig);
+            // Mantener la resolución actual cuando se actualiza el área de detección
+            const configToSend = {
+                resolution: this.config.resolution,  // Mantener la resolución actual
+                ...newConfig  // Agregar los nuevos parámetros
+            };
+            
+            console.log('Enviando configuración al servidor:', configToSend);
             const response = await fetch('/update-config', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(newConfig)
+                body: JSON.stringify(configToSend)
             });
-
+    
             if (!response.ok) {
-                throw new Error('Failed to update configuration');
+                const errorData = await response.json();
+                console.error('Error del servidor:', errorData);
+                throw new Error(`Error del servidor: ${response.status} - ${errorData.error || 'Error desconocido'}`);
             }
             
-            this.config = newConfig;
+            const data = await response.json();
+            console.log('Respuesta del servidor:', data);
+            
+            this.config = { ...this.config, ...newConfig };
             console.log('Configuración actualizada correctamente');
-
+    
         } catch (error) {
-            console.error('Error updating config:', error);
+            console.error('Error completo al actualizar config:', error);
             throw error;
         }
     }
-
     async getMetrics(): Promise<any> {
         try {
             const response = await fetch('/metrics');

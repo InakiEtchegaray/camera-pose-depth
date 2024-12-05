@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import { IonCard, IonCardContent } from '@ionic/react';
+import { IonCard, IonCardContent, IonButton } from '@ionic/react';
 import WebRTCService from '../../services/WebRTCService';
+import AreaSelector from '../AreaSelector/AreaSelector';
 import './VideoStream.css';
 
 interface Props {
@@ -17,6 +18,7 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSelectingArea, setIsSelectingArea] = useState(false);
   const mountedRef = useRef(true);
 
   const setupStream = async () => {
@@ -44,6 +46,29 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
     }
   };
 
+  const handleAreaSelected = async (area: { x1: number; y1: number; x2: number; y2: number }) => {
+    try {
+        console.log('Área seleccionada en frontend:', area);
+        const areaArray = [
+            Math.round(area.x1),
+            Math.round(area.y1),
+            Math.round(area.x2),
+            Math.round(area.y2)
+        ] as [number, number, number, number];
+        
+        console.log('Enviando al servidor:', { detection_area: areaArray, resolution: '640,480' });
+        
+        await WebRTCService.updateConfig({
+            resolution: '640,480',
+            detection_area: areaArray
+        });
+        console.log('Área enviada correctamente');
+        setIsSelectingArea(false);
+    } catch (error) {
+        console.error('Error detallado al actualizar área:', error);
+        setError('Error al configurar área de detección');
+    }
+  };
   useEffect(() => {
     mountedRef.current = true;
     setupStream();
@@ -69,6 +94,12 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
           muted
           className="video-element"
         />
+        {isSelectingArea && (
+          <AreaSelector
+            videoElement={videoRef.current}
+            onAreaSelected={handleAreaSelected}
+          />
+        )}
         {isConnecting && (
           <div className="connection-overlay">
             Conectando...
@@ -79,6 +110,14 @@ export const VideoStream = forwardRef<VideoStreamRef, Props>((props, ref) => {
             Error: {error}
           </div>
         )}
+        <div className="controls-overlay">
+          <IonButton
+            onClick={() => setIsSelectingArea(!isSelectingArea)}
+            className="area-selector-button"
+          >
+            {isSelectingArea ? 'Cancelar' : 'Seleccionar Área'}
+          </IonButton>
+        </div>
       </IonCardContent>
     </IonCard>
   );

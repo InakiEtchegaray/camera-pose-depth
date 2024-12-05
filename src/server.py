@@ -9,12 +9,16 @@ from collections import deque
 
 from supervision_processor import SupervisionTransformTrack
 
-# Configuración de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
+
+# Resoluciones comunes soportadas
+SUPPORTED_RESOLUTIONS = [
+    {'width': 640, 'height': 480},   # VGA
+    {'width': 1280, 'height': 720},  # HD
+    {'width': 1920, 'height': 1080}, # Full HD
+    {'width': 320, 'height': 240},   # QVGA
+    {'width': 800, 'height': 600},   # SVGA
+]
 
 class WebRTCServer:
     def __init__(self):
@@ -53,8 +57,16 @@ class WebRTCServer:
         self.app.router.add_post("/offer", self.offer)
         self.app.router.add_post("/update-config", self.update_config)
         self.app.router.add_get("/metrics", self.get_metrics)
+        self.app.router.add_get("/supported-resolutions", self.get_supported_resolutions)
         
         logger.info("Rutas del servidor inicializadas")
+
+    async def get_supported_resolutions(self, request: web.Request) -> web.Response:
+        """Retorna las resoluciones soportadas."""
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps(SUPPORTED_RESOLUTIONS)
+        )
 
     async def cleanup_old_connections(self):
         """Limpia las conexiones antiguas."""
@@ -68,9 +80,7 @@ class WebRTCServer:
         try:
             params = await request.json()
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
-            
-            # Configuración más simple para RTCPeerConnection
-            pc = RTCPeerConnection()  # Sin configuración ICE por ahora
+            pc = RTCPeerConnection()
             self.pcs.add(pc)
 
             initial_config = params.get("config", {})
@@ -80,15 +90,11 @@ class WebRTCServer:
             async def on_connectionstatechange():
                 logger.info(f"Estado de conexión: {pc.connectionState}")
                 if pc.connectionState == "failed":
-                    logger.info("Conexión fallida, cerrando...")
                     await pc.close()
                     self.pcs.discard(pc)
                 elif pc.connectionState == "connected":
                     logger.info("Conexión establecida correctamente")
-                elif pc.connectionState == "disconnected":
-                    logger.info("Conexión desconectada")
 
-            # Crear track de Supervision
             video = SupervisionTransformTrack({
                 'width': width,
                 'height': height
@@ -128,6 +134,18 @@ class WebRTCServer:
             data = await request.json()
             width, height = map(int, data['resolution'].split(','))
             
+            # Verificar si la resolución está soportada
+            resolution = {'width': width, 'height': height}
+            if resolution not in SUPPORTED_RESOLUTIONS:
+                return web.Response(
+                    status=400,
+                    content_type="application/json",
+                    text=json.dumps({
+                        "success": False,
+                        "error": "Resolución no soportada"
+                    })
+                )
+
             # Actualizar tracks activos
             self.active_tracks = [track for track in self.active_tracks 
                                 if track.readyState != "ended"]
@@ -145,7 +163,10 @@ class WebRTCServer:
 
             return web.Response(
                 content_type="application/json",
-                text=json.dumps({"success": success})
+                text=json.dumps({
+                    "success": success,
+                    "resolution": f"{width}x{height}"
+                })
             )
         except Exception as e:
             logger.error(f"Error al actualizar configuración: {e}")
@@ -186,8 +207,7 @@ class WebRTCServer:
                 content_type="application/json",
                 text=json.dumps({
                     'fps': 0,
-                    'status': 'error',
-                    'error': str(e)
+                    'status': 'error'
                 })
             )
 
