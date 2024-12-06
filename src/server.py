@@ -4,14 +4,13 @@ import logging
 import os
 from aiohttp import web
 from aiohttp_cors import setup as cors_setup, ResourceOptions
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack, RTCDataChannel
 from collections import deque
 
 from supervision_processor import SupervisionTransformTrack
 
 logger = logging.getLogger(__name__)
 
-# Resoluciones comunes soportadas
 SUPPORTED_RESOLUTIONS = [
     {'width': 640, 'height': 480},   # VGA
     {'width': 1280, 'height': 720},  # HD
@@ -83,6 +82,8 @@ class WebRTCServer:
             pc = RTCPeerConnection()
             self.pcs.add(pc)
 
+            # Crear canal de datos para alertas
+            dc = pc.createDataChannel('alerts')
             initial_config = params.get("config", {})
             width, height = map(int, initial_config.get('resolution', '640,480').split(','))
 
@@ -99,6 +100,17 @@ class WebRTCServer:
                 'width': width,
                 'height': height
             })
+            
+            # Configurar el canal de datos en el track
+            @dc.on("open")
+            def on_open():
+                logger.info("Canal de datos abierto")
+                video.alert_manager.add_data_channel(dc)
+
+            @dc.on("close")
+            def on_close():
+                logger.info("Canal de datos cerrado")
+                video.alert_manager.remove_data_channel(dc)
             
             self.active_tracks = [track for track in self.active_tracks 
                                 if track.readyState != "ended"]
@@ -132,19 +144,21 @@ class WebRTCServer:
         """Actualiza la configuración de procesamiento."""
         try:
             data = await request.json()
-            width, height = map(int, data['resolution'].split(','))
             
-            # Verificar si la resolución está soportada
-            resolution = {'width': width, 'height': height}
-            if resolution not in SUPPORTED_RESOLUTIONS:
-                return web.Response(
-                    status=400,
-                    content_type="application/json",
-                    text=json.dumps({
-                        "success": False,
-                        "error": "Resolución no soportada"
-                    })
-                )
+            # Si hay configuración de resolución
+            if 'resolution' in data:
+                width, height = map(int, data['resolution'].split(','))
+                # Verificar si la resolución está soportada
+                resolution = {'width': width, 'height': height}
+                if resolution not in SUPPORTED_RESOLUTIONS:
+                    return web.Response(
+                        status=400,
+                        content_type="application/json",
+                        text=json.dumps({
+                            "success": False,
+                            "error": "Resolución no soportada"
+                        })
+                    )
 
             # Actualizar tracks activos
             self.active_tracks = [track for track in self.active_tracks 
@@ -153,10 +167,7 @@ class WebRTCServer:
             success = True
             for track in self.active_tracks:
                 try:
-                    track.update_config({
-                        'width': width,
-                        'height': height,
-                    })
+                    track.update_config(data)
                 except Exception as e:
                     logger.error(f"Error actualizando track: {e}")
                     success = False
@@ -165,7 +176,7 @@ class WebRTCServer:
                 content_type="application/json",
                 text=json.dumps({
                     "success": success,
-                    "resolution": f"{width}x{height}"
+                    "config": data
                 })
             )
         except Exception as e:

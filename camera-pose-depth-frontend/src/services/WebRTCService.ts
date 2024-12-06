@@ -3,8 +3,20 @@ interface Config {
     detection_area?: [number, number, number, number];  // tupla opcional de 4 números
 }
 
+interface DetectionAlert {
+    type: 'detection_alert';
+    timestamp: number;
+    personCount: number;
+    areaOccupied: boolean;
+    confidence: number;
+}
+
+type AlertHandler = (alert: DetectionAlert) => void;
+
 class WebRTCService {
     private peerConnection: RTCPeerConnection | null = null;
+    private alertChannel: RTCDataChannel | null = null;
+    private alertHandlers: AlertHandler[] = [];
     private config: Config = {
         resolution: '640,480'
     };
@@ -29,6 +41,15 @@ class WebRTCService {
 
             console.log('Creando nueva conexión RTCPeerConnection');
             this.peerConnection = new RTCPeerConnection(this.rtcConfig);
+
+            // Configurar canal de datos para alertas
+            this.peerConnection.ondatachannel = (event) => {
+                if (event.channel.label === 'alerts') {
+                    console.log('Canal de alertas recibido');
+                    this.alertChannel = event.channel;
+                    this.setupAlertChannel();
+                }
+            };
 
             this.peerConnection.addEventListener('track', (evt) => {
                 console.log('Track recibido:', evt.track.kind);
@@ -85,6 +106,27 @@ class WebRTCService {
         }
     }
 
+    private setupAlertChannel() {
+        if (!this.alertChannel) return;
+
+        this.alertChannel.onmessage = (event) => {
+            try {
+                const alert = JSON.parse(event.data) as DetectionAlert;
+                this.alertHandlers.forEach(handler => handler(alert));
+            } catch (e) {
+                console.error('Error procesando alerta:', e);
+            }
+        };
+
+        this.alertChannel.onclose = () => {
+            console.log('Canal de alertas cerrado');
+        };
+
+        this.alertChannel.onerror = (error) => {
+            console.error('Error en canal de alertas:', error);
+        };
+    }
+
     async updateConfig(newConfig: Partial<Config>): Promise<void> {
         try {
             // Mantener la resolución actual cuando se actualiza el área de detección
@@ -119,6 +161,16 @@ class WebRTCService {
             throw error;
         }
     }
+
+    // Método para suscribirse a alertas
+    onAlert(handler: AlertHandler): () => void {
+        this.alertHandlers.push(handler);
+        // Retornar función para desuscribirse
+        return () => {
+            this.alertHandlers = this.alertHandlers.filter(h => h !== handler);
+        };
+    }
+
     async getMetrics(): Promise<any> {
         try {
             const response = await fetch('/metrics');
@@ -140,6 +192,15 @@ class WebRTCService {
     }
 
     disconnect(): void {
+        // Limpiar los manejadores de alertas
+        this.alertHandlers = [];
+        
+        // Cerrar el canal de datos
+        if (this.alertChannel) {
+            this.alertChannel.close();
+            this.alertChannel = null;
+        }
+
         if (this.peerConnection) {
             try {
                 const senders = this.peerConnection.getSenders();
